@@ -1,3 +1,7 @@
+#training script for mlp model
+#trains the model on mnist dataset using stochastic gradient descent
+#evaluates on train and test sets, prints metrics, and saves the trained model
+
 import numpy as np
 from typing import Generator
 

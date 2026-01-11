@@ -1,3 +1,6 @@
+#evaluation metrics utilities
+#implements confusion matrix for classification evaluation
+
 import numpy as np
 
 #confusion matrix function that takes the true labels, the predicted labels, and the number of classes and returns the confusion matrix

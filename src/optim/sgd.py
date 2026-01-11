@@ -1,3 +1,7 @@
+#stochastic gradient descent (sgd) optimizer implementation
+#updates model parameters using gradients and a learning rate
+#performs parameter update: params = params - lr * grads
+
 import numpy as np
 
 class SGD: #Stochastic Gradient Descent

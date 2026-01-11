@@ -1,3 +1,8 @@
+#cross entropy loss function implementation
+#computes cross entropy loss between predicted probabilities and true labels
+#forward pass: computes the loss
+#backward pass: returns gradient w.r.t. probabilities
+
 import numpy as np
 #cross entropy loss function
 class CrossEntropyLoss:

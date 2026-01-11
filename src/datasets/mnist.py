@@ -1,3 +1,8 @@
+#mnist dataset loader
+#downloads and loads the mnist dataset from openml
+#normalizes pixel values to 0-1 range and optionally flattens images
+#returns train/test splits of data and labels
+
 from __future__ import annotations
 import numpy as np 
 from sklearn.datasets import fetch_openml

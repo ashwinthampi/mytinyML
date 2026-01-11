@@ -1,3 +1,7 @@
+#softmax regression model implementation
+#implements a simple linear classifier with softmax activation
+#forward pass: computes logits and applies softmax to get probabilities
+
 import numpy as np
 
 class SoftmaxRegression:

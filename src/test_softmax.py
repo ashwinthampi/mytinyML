@@ -1,3 +1,7 @@
+#test script for softmax regression model
+#loads mnist data, creates a model, and tests forward pass
+#prints output shape, probability sums, and value ranges
+
 from datasets.mnist import load_mnist
 from models.softmax_regression import SoftmaxRegression
 import numpy as np
