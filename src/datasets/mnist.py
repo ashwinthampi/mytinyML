@@ -26,7 +26,7 @@ def load_mnist( # download the mnist dataset from openml
         X_train = X_train.reshape(-1, 28 * 28)
         X_test = X_test.reshape(-1, 28 * 28)
 
-    return X_train, X_test, y_train, y_test
+    return X_train, y_train, X_test, y_test
 
 #just for testing
 # X_train, y_train, X_test, y_test = load_mnist()
