@@ -1,9 +1,8 @@
 import numpy as np
 #save the model to a file
-def save_model(path: str, W: np.ndarray, b: np.ndarray) -> None:
-    np.savez(path, W=W, b=b)
+def save_model(path: str, params: dict[str, np.ndarray]) -> None:
+    np.savez(path, **params)
 
 #load the model from a file
-def load_model(path: str) -> tuple[np.ndarray, np.ndarray]:
-    data = np.load(path)
-    return data["W"], data["b"]
+def load_model(path: str) -> dict[str, np.ndarray]:
+    return dict(np.load(path))

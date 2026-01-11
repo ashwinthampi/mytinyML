@@ -2,7 +2,8 @@ import numpy as np
 from typing import Generator
 
 from datasets.mnist import load_mnist
-from models.softmax_regression import SoftmaxRegression
+#from models.softmax_regression import SoftmaxRegression
+from models.mlp import MLP
 from losses.cross_entropy import CrossEntropyLoss
 from optim.sgd import SGD
 from utils.io import save_model
@@ -29,7 +30,8 @@ def main():
     X_train, y_train, X_test, y_test = load_mnist()
 
     #initialize the model, loss function, and optimizer
-    model = SoftmaxRegression(n_classes=10, n_features=X_train.shape[1])
+    #model = SoftmaxRegression(n_classes=10, n_features=X_train.shape[1])
+    model = MLP(n_features=X_train.shape[1], n_hidden=128, n_classes=10)
     loss_fn = CrossEntropyLoss()
     optimizer = SGD(lr=0.1)
 
@@ -49,14 +51,20 @@ def main():
             epoch_loss += loss
             num_batches += 1
 
-            dZ = loss_fn.backward(probs, yb) 
+            # dZ = loss_fn.backward(probs, yb) 
 
-            dW = dZ.T @ Xb                    
-            db = np.sum(dZ, axis=0)           
+            # dW = dZ.T @ Xb                    
+            # db = np.sum(dZ, axis=0)           
 
+            # optimizer.step(
+            #     params={"W": model.W, "b": model.b},
+            #     grads={"W": dW, "b": db}
+            # )
+            dZ2 = loss_fn.backward(probs, yb)
+            grads = model.backward(dZ2)
             optimizer.step(
-                params={"W": model.W, "b": model.b},
-                grads={"W": dW, "b": db}
+                params=model.parameters(),
+                grads=grads
             )
 
         train_probs = model.forward(X_train[:5000])
@@ -76,7 +84,7 @@ def main():
     cm = confusion_matrix(y_test, preds, 10)
     print(cm)
     #save the model
-    save_model("softmax_mnist.npz", model.W, model.b)
+    save_model("mlp_mnist.npz", model.parameters())
 
 if __name__ == "__main__":
     main()
