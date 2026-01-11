@@ -5,6 +5,8 @@ from datasets.mnist import load_mnist
 from models.softmax_regression import SoftmaxRegression
 from losses.cross_entropy import CrossEntropyLoss
 from optim.sgd import SGD
+from utils.io import save_model
+from utils.metrics import confusion_matrix
 
 #accuracy function that takes the probabilities and the true labels and returns the accuracy
 def accuracy(probs: np.ndarray, y: np.ndarray) -> float:
@@ -70,6 +72,11 @@ def main():
             f"Test Acc: {test_acc:.4f}"
         )
 
+    preds = np.argmax(test_probs, axis=1)
+    cm = confusion_matrix(y_test, preds, 10)
+    print(cm)
+    #save the model
+    save_model("softmax_mnist.npz", model.W, model.b)
 
 if __name__ == "__main__":
     main()
