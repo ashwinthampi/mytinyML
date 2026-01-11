@@ -29,8 +29,8 @@ def load_mnist( # download the mnist dataset from openml
     return X_train, X_test, y_train, y_test
 
 #just for testing
-X_train, y_train, X_test, y_test = load_mnist()
+# X_train, y_train, X_test, y_test = load_mnist()
 
-print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
-print(X_train[:10], y_train[:10])
-print(X_train.min(), X_train.max())  # 0.0 to 1.0
+# print(X_train.shape, y_train.shape, X_test.shape, y_test.shape)
+# print(X_train[:10], y_train[:10])
+# print(X_train.min(), X_train.max())  # 0.0 to 1.0
