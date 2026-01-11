@@ -1,3 +1,7 @@
+#prediction script for mlp model
+#loads a trained model and makes predictions on test images
+#displays a random test image with its predicted label
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -16,14 +20,11 @@ def preprocess_image(image: np.ndarray) -> np.ndarray:
 #predict the digit from the image
 def main():
     params = load_model("mlp_mnist.npz")
-    n_features = params["W1"].shape[1]
-    n_hidden = params["W1"].shape[0]
+    n_features = params["W1"].shape[0]
+    n_hidden = params["W1"].shape[1]
     n_classes = params["W2"].shape[1]
     model = MLP(n_features=n_features, n_hidden=n_hidden, n_classes=n_classes)
-    model.W1 = params["W1"]
-    model.b1 = params["b1"]
-    model.W2 = params["W2"]
-    model.b2 = params["b2"]
+    model.set_parameters(params)
 
     # W, b = load_model("softmax_mnist.npz")
     # model = SoftmaxRegression(n_classes=10, n_features=W.shape[1])

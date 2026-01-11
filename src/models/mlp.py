@@ -1,74 +1,77 @@
+#multi-layer perceptron (mlp) implementation using composable layers
+#implements a 2-layer mlp with one hidden layer
+#uses linear and relu layers for modularity and reusability
+#forward pass: input -> linear1 -> relu1 -> linear2 -> softmax
+#backward pass: propagates gradients through all layers
+
 import numpy as np
+from layers.linear import Linear
+from layers.relu import ReLU
 
 class MLP:
-    #initialize the MLP with the number of features, hidden layers, and classes
     def __init__(self, n_features: int, n_hidden: int, n_classes: int = 10, seed: int = 42):
-        rng = np.random.default_rng(seed=seed)
-
-        #initialize the weights and biases for the first layer
-        self.W1 = (rng.normal(0.0, 1.0, size=(n_features, n_hidden)) * np.sqrt(2.0 / n_features)).astype(np.float32)
-        self.b1 = np.zeros((n_hidden,), dtype=np.float32)
-
-        #initialize the weights and biases for the second layer
-        self.W2 = (rng.normal(0.0, 1.0, size=(n_hidden, n_classes)) * np.sqrt(2.0 / n_hidden)).astype(np.float32)
-        self.b2 = np.zeros((n_classes,), dtype=np.float32)
-
-        #caches
-        self._X = None
-        self._Z1 = None
-        self._A1 = None
-
-    #relu activation function
-    @staticmethod
-    def relu(Z: np.ndarray) -> np.ndarray:
-        return np.maximum(0.0, Z)
-
-    #softmax activation function
+        #first layer: input -> hidden
+        self.linear1 = Linear(n_features, n_hidden, seed=seed)
+        self.relu1 = ReLU()
+        
+        #second layer: hidden -> output
+        self.linear2 = Linear(n_hidden, n_classes, seed=seed + 1)
+    
+    #softmax activation function that takes raw scores and returns probabilities
     @staticmethod
     def softmax(Z: np.ndarray) -> np.ndarray:
         Z = Z - np.max(Z, axis=1, keepdims=True)
         expZ = np.exp(Z)
         return expZ / np.sum(expZ, axis=1, keepdims=True)
-
-    #forward pass
+    
+    #forward pass through the network
     def forward(self, X: np.ndarray) -> np.ndarray:
-        #calculate the input to the first layer
-        Z1 = X @ self.W1 + self.b1      
-        #apply the relu activation function to the first layer
-        A1 = self.relu(Z1)              
-        #calculate the input to the second layer
-        Z2 = A1 @ self.W2 + self.b2     
-        #apply the softmax activation function to the second layer
-        P = self.softmax(Z2)            
-
-        #store the inputs and activations for backpropagation
-        self._X = X
-        self._Z1 = Z1
-        self._A1 = A1
+        #first layer: linear -> relu
+        Z1 = self.linear1.forward(X)
+        A1 = self.relu1.forward(Z1)
+        
+        #second layer: linear -> softmax
+        Z2 = self.linear2.forward(A1)
+        P = self.softmax(Z2)
+        
         return P
-
-    #backward pass
+    
+    #backward pass through the network
     def backward(self, dZ2: np.ndarray) -> dict[str, np.ndarray]:
-        #get the inputs and activations from the caches
-        X = self._X      
-        Z1 = self._Z1    
-        A1 = self._A1    
-
-        #calculate the gradient of the weights and biases for the second layer
-        dW2 = A1.T @ dZ2                 
-        db2 = np.sum(dZ2, axis=0)        
-
-        #calculate the gradient of the weights and biases for the first layer
-        dA1 = dZ2 @ self.W2.T            
-        dZ1 = dA1 * (Z1 > 0)             
-
-        #calculate the gradient of the weights and biases for the first layer
-        dW1 = X.T @ dZ1                  
-        db1 = np.sum(dZ1, axis=0)        
-
-        #return the gradients of the weights and biases
-        return {"W1": dW1, "b1": db1, "W2": dW2, "b2": db2}
-
-    #return the weights and biases
+        #backward through linear2
+        dA1 = self.linear2.backward(dZ2)
+        grads2 = self.linear2.gradients()
+        
+        #backward through relu1
+        dZ1 = self.relu1.backward(dA1)
+        
+        #backward through linear1
+        _ = self.linear1.backward(dZ1)
+        grads1 = self.linear1.gradients()
+        
+        #aggregate all gradients (map from layer keys to mlp keys)
+        return {
+            "W1": grads1["W"],
+            "b1": grads1["b"],
+            "W2": grads2["W"],
+            "b2": grads2["b"]
+        }
+    
+    #return all model parameters
     def parameters(self) -> dict[str, np.ndarray]:
-        return {"W1": self.W1, "b1": self.b1, "W2": self.W2, "b2": self.b2}
+        params1 = self.linear1.parameters()
+        params2 = self.linear2.parameters()
+        
+        return {
+            "W1": params1["W"],
+            "b1": params1["b"],
+            "W2": params2["W"],
+            "b2": params2["b"]
+        }
+    
+    #set model parameters from a dictionary
+    def set_parameters(self, params: dict[str, np.ndarray]) -> None:
+        self.linear1.W = params["W1"]
+        self.linear1.b = params["b1"]
+        self.linear2.W = params["W2"]
+        self.linear2.b = params["b2"]
