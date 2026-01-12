@@ -1,4 +1,4 @@
-#training script for mlp model
+#training script for cnn model
 #trains the model on mnist dataset using adam optimizer
 #uses validation split and early stopping for better generalization
 #evaluates on test set only at the end
@@ -9,7 +9,8 @@ from sklearn.model_selection import train_test_split
 
 from datasets.mnist import load_mnist
 #from models.softmax_regression import SoftmaxRegression
-from models.mlp import MLP
+#from models.mlp import MLP
+from models.cnn import CNN
 from losses.cross_entropy import CrossEntropyLoss
 from optim.adam import Adam
 from utils.io import save_model
@@ -33,7 +34,8 @@ def iterate_minibatches(X: np.ndarray, y: np.ndarray, batch_size: int, seed: int
 
 #main train function
 def main():
-    X_train_full, y_train_full, X_test, y_test = load_mnist()
+    #load mnist data without flattening (for cnn: shape will be (N, 1, 28, 28))
+    X_train_full, y_train_full, X_test, y_test = load_mnist(flatten=False)
     
     #split training data into train and validation sets (stratified to keep class distribution balanced)
     X_train, X_val, y_train, y_val = train_test_split(
@@ -42,8 +44,8 @@ def main():
 
     #initialize the model, loss function, and optimizer
     #model = SoftmaxRegression(n_classes=10, n_features=X_train.shape[1])
-    #use new stackable mlp interface with variable depth
-    model = MLP(layer_sizes=[X_train.shape[1], 256, 128, 64, 10])
+    #use cnn model for image classification
+    model = CNN()
     loss_fn = CrossEntropyLoss()
     #optimizer = SGD(lr=0.1)
     optimizer = Adam(lr=0.001)
@@ -91,7 +93,8 @@ def main():
             #add l2 weight decay to gradients (only for weights, not biases)
             params = model.parameters()
             for k in grads:
-                if k.startswith("W"):
+                #check if key is a weight (not a bias) - handles both MLP ("W0", "W1") and CNN ("conv_W0", "linear_W0") keys
+                if "_W" in k or (k.startswith("W") and len(k) > 1 and k[1].isdigit()):
                     grads[k] += weight_decay * params[k]
             
             optimizer.step(
@@ -151,7 +154,7 @@ def main():
     print(cm)
     
     #save the model
-    save_model("mlp_mnist.npz", model.parameters())
+    save_model("cnn_mnist.npz", model.parameters())
 
 if __name__ == "__main__":
     main()

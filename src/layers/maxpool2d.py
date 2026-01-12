@@ -36,7 +36,7 @@ class MaxPool2D:
         H_out = (H_in - self.pool_size) // self.stride + 1
         W_out = (W_in - self.pool_size) // self.stride + 1
         
-        #optional: validate that dimensions divide cleanly (helps catch accidental configs)
+        #validate that dimensions divide cleanly (helps catch accidental configs)
         #frameworks don't require this, but it helps catch mistakes
         assert (H_in - self.pool_size) % self.stride == 0, \
             f"Height dimension doesn't divide cleanly: (H={H_in} - pool_size={self.pool_size}) % stride={self.stride} != 0"
