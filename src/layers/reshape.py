@@ -31,3 +31,4 @@ class Reshape:
     #return the layer parameters (empty for reshape since it has no learnable parameters)
     def parameters(self) -> dict[str, np.ndarray]:
         return {}
+        
