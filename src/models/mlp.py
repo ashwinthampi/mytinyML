@@ -7,6 +7,7 @@
 import numpy as np
 from layers.linear import Linear
 from layers.relu import ReLU
+from layers.dropout import Dropout
 
 class MLP:
     def __init__(self, layer_sizes: list[int] | None = None, n_features: int | None = None, 
@@ -33,9 +34,10 @@ class MLP:
             self.layers.append(Linear(in_size, out_size, seed=seed + linear_idx))
             linear_idx += 1
             
-            #add relu after each linear layer except the last one
+            #add relu and dropout after each linear layer except the last one
             if i < len(self.layer_sizes) - 2:
                 self.layers.append(ReLU())
+                self.layers.append(Dropout(p=0.2))
     
     #softmax activation function that takes raw scores and returns probabilities
     @staticmethod
@@ -85,6 +87,18 @@ class MLP:
                 params[f"b{linear_idx}"] = layer_params["b"]
                 linear_idx += 1
         return params
+    
+    #set model to training mode (enables dropout, etc.)
+    def train(self) -> None:
+        for layer in self.layers:
+            if hasattr(layer, "training"):
+                layer.training = True
+    
+    #set model to evaluation mode (disables dropout, etc.)
+    def eval(self) -> None:
+        for layer in self.layers:
+            if hasattr(layer, "training"):
+                layer.training = False
     
     #set model parameters from a dictionary
     def set_parameters(self, params: dict[str, np.ndarray]) -> None:

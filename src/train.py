@@ -1,9 +1,11 @@
 #training script for mlp model
 #trains the model on mnist dataset using adam optimizer
-#evaluates on train and test sets, prints metrics, and saves the trained model
+#uses validation split and early stopping for better generalization
+#evaluates on test set only at the end
 
 import numpy as np
 from typing import Generator
+from sklearn.model_selection import train_test_split
 
 from datasets.mnist import load_mnist
 #from models.softmax_regression import SoftmaxRegression
@@ -31,7 +33,12 @@ def iterate_minibatches(X: np.ndarray, y: np.ndarray, batch_size: int, seed: int
 
 #main train function
 def main():
-    X_train, y_train, X_test, y_test = load_mnist()
+    X_train_full, y_train_full, X_test, y_test = load_mnist()
+    
+    #split training data into train and validation sets (stratified to keep class distribution balanced)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train_full, y_train_full, test_size=0.1, random_state=42, stratify=y_train_full
+    )
 
     #initialize the model, loss function, and optimizer
     #model = SoftmaxRegression(n_classes=10, n_features=X_train.shape[1])
@@ -42,11 +49,23 @@ def main():
     optimizer = Adam(lr=0.001)
 
     #number of epochs and batch size
-    epochs = 10
+    epochs = 50
     batch_size = 128
+    
+    #l2 weight decay parameter
+    weight_decay = 1e-4
+    
+    #early stopping parameters
+    patience = 5
+    best_val_loss = float('inf')
+    patience_counter = 0
+    best_model_params = None
 
     #train the model
     for epoch in range(epochs):
+        #set model to training mode (enables dropout, etc.)
+        model.train()
+        
         epoch_loss = 0.0
         num_batches = 0
 
@@ -70,7 +89,6 @@ def main():
             grads = model.backward(dZ2)
             
             #add l2 weight decay to gradients (only for weights, not biases)
-            weight_decay = 1e-4
             params = model.parameters()
             for k in grads:
                 if k.startswith("W"):
@@ -81,22 +99,57 @@ def main():
                 grads=grads
             )
 
+        #set model to evaluation mode (disables dropout, etc.)
+        model.eval()
+        
+        #evaluate on training and validation sets
         train_probs = model.forward(X_train[:5000])
-        test_probs = model.forward(X_test)
-
+        val_probs = model.forward(X_val)
+        
         train_acc = accuracy(train_probs, y_train[:5000])
-        test_acc = accuracy(test_probs, y_test)
+        val_acc = accuracy(val_probs, y_val)
+        val_loss = loss_fn.forward(val_probs, y_val)
 
         print(
             f"Epoch {epoch+1}/{epochs}, "
-            f"Loss: {epoch_loss/num_batches:.4f}, "
+            f"Train Loss: {epoch_loss/num_batches:.4f}, "
             f"Train Acc: {train_acc:.4f}, "
-            f"Test Acc: {test_acc:.4f}"
+            f"Val Loss: {val_loss:.4f}, "
+            f"Val Acc: {val_acc:.4f}"
         )
+        
+        #early stopping: check if validation loss improved
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+            #save best model parameters
+            best_model_params = {k: v.copy() for k, v in model.parameters().items()}
+            print(f"  -> New best validation loss: {best_val_loss:.4f}")
+        else:
+            patience_counter += 1
+            if patience_counter >= patience:
+                print(f"  -> Early stopping triggered after {epoch+1} epochs")
+                break
 
+    #restore best model parameters
+    if best_model_params is not None:
+        model.set_parameters(best_model_params)
+        print(f"\nRestored best model (val loss: {best_val_loss:.4f})")
+    
+    #evaluate on test set (only at the end)
+    model.eval()
+    print("\nEvaluating on test set...")
+    test_probs = model.forward(X_test)
+    test_acc = accuracy(test_probs, y_test)
+    test_loss = loss_fn.forward(test_probs, y_test)
+    
+    print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
+    
     preds = np.argmax(test_probs, axis=1)
     cm = confusion_matrix(y_test, preds, 10)
+    print("\nConfusion Matrix:")
     print(cm)
+    
     #save the model
     save_model("mlp_mnist.npz", model.parameters())
 
