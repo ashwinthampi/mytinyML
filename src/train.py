@@ -35,7 +35,8 @@ def main():
 
     #initialize the model, loss function, and optimizer
     #model = SoftmaxRegression(n_classes=10, n_features=X_train.shape[1])
-    model = MLP(n_features=X_train.shape[1], n_hidden=128, n_classes=10)
+    #use new stackable mlp interface with variable depth
+    model = MLP(layer_sizes=[X_train.shape[1], 256, 128, 64, 10])
     loss_fn = CrossEntropyLoss()
     #optimizer = SGD(lr=0.1)
     optimizer = Adam(lr=0.001)
@@ -67,8 +68,16 @@ def main():
             # )
             dZ2 = loss_fn.backward(probs, yb)
             grads = model.backward(dZ2)
+            
+            #add l2 weight decay to gradients (only for weights, not biases)
+            weight_decay = 1e-4
+            params = model.parameters()
+            for k in grads:
+                if k.startswith("W"):
+                    grads[k] += weight_decay * params[k]
+            
             optimizer.step(
-                params=model.parameters(),
+                params=params,
                 grads=grads
             )
 
