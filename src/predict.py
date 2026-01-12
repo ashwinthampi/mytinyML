@@ -20,10 +20,27 @@ def preprocess_image(image: np.ndarray) -> np.ndarray:
 #predict the digit from the image
 def main():
     params = load_model("mlp_mnist.npz")
-    n_features = params["W1"].shape[0]
-    n_hidden = params["W1"].shape[1]
-    n_classes = params["W2"].shape[1]
-    model = MLP(n_features=n_features, n_hidden=n_hidden, n_classes=n_classes)
+    
+    #infer layer sizes from parameter keys
+    #handle both old format (W1, b1, W2, b2) and new format (W0, b0, W1, b1, ...)
+    weight_keys = sorted([k for k in params.keys() if k.startswith("W")], 
+                         key=lambda x: int(x[1:]) if x[1:].isdigit() else 0)
+    
+    if not weight_keys:
+        raise ValueError("No weight parameters found in saved model")
+    
+    #build layer_sizes from weights
+    layer_sizes = []
+    for i, key in enumerate(weight_keys):
+        W = params[key]
+        if i == 0:
+            #first layer: input size is first dimension
+            layer_sizes.append(W.shape[0])
+        #output size is second dimension
+        layer_sizes.append(W.shape[1])
+    
+    #create model with inferred architecture
+    model = MLP(layer_sizes=layer_sizes)
     model.set_parameters(params)
 
     # W, b = load_model("softmax_mnist.npz")
