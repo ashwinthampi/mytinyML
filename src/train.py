@@ -1,5 +1,5 @@
 #training script for mlp model
-#trains the model on mnist dataset using stochastic gradient descent
+#trains the model on mnist dataset using adam optimizer
 #evaluates on train and test sets, prints metrics, and saves the trained model
 
 import numpy as np
@@ -9,7 +9,7 @@ from datasets.mnist import load_mnist
 #from models.softmax_regression import SoftmaxRegression
 from models.mlp import MLP
 from losses.cross_entropy import CrossEntropyLoss
-from optim.sgd import SGD
+from optim.adam import Adam
 from utils.io import save_model
 from utils.metrics import confusion_matrix
 
@@ -37,7 +37,8 @@ def main():
     #model = SoftmaxRegression(n_classes=10, n_features=X_train.shape[1])
     model = MLP(n_features=X_train.shape[1], n_hidden=128, n_classes=10)
     loss_fn = CrossEntropyLoss()
-    optimizer = SGD(lr=0.1)
+    #optimizer = SGD(lr=0.1)
+    optimizer = Adam(lr=0.001)
 
     #number of epochs and batch size
     epochs = 10
