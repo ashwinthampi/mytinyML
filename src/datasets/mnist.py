@@ -17,19 +17,26 @@ def load_mnist( # download the mnist dataset from openml
     mnist = fetch_openml("mnist_784", version=1, as_frame=False, parser="auto")
 
     #extract the data and target from the mnist dataset
-    X = mnist.data.astype(float) #contains pixel values and y is the digit labels
+    #use float32 for faster computation and less memory (especially important for CNNs)
+    X = mnist.data.astype(np.float32) #contains pixel values and y is the digit labels
     y = mnist.target.astype(int)
-    #split the data into training and testing sets
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=seed)
+    #split the data into training and testing sets (stratified to keep digit proportions consistent)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=seed, stratify=y)
 
     #normalize the pixel values to be between 0 and 1
     if normalize:
         X_train = X_train / 255.0
         X_test = X_test / 255.0
-    #flatten images into 1D vectors
+    
+    #flatten images into 1D vectors (for MLP) or keep as 2D images (for CNN)
     if flatten:
+        #old behavior: flatten to (N, 784) for MLP
         X_train = X_train.reshape(-1, 28 * 28)
         X_test = X_test.reshape(-1, 28 * 28)
+    else:
+        #new behavior: reshape to (N, 1, 28, 28) for CNN (channel-first format)
+        X_train = X_train.reshape(-1, 1, 28, 28)
+        X_test = X_test.reshape(-1, 1, 28, 28)
 
     return X_train, y_train, X_test, y_test
 
