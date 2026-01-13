@@ -1,7 +1,7 @@
 #maxpool2d layer implementation
 #implements 2d max pooling operation for convolutional neural networks
-#forward pass: takes maximum value in each pool_size x pool_size region
-#backward pass: routes gradient only to the argmax location (the position that had the max value)
+#forward pass: takes maximum value in each pool_size x pool_size region (vectorized)
+#backward pass: routes gradient only to the argmax location (vectorized)
 #reduces spatial dimensions, improves translation invariance, and speeds up computation
 
 import numpy as np
@@ -15,9 +15,9 @@ class MaxPool2D:
         
         #cache for backward pass (stores which position had the max value)
         self._X = None
-        self._argmax = None
+        self._argmax = None  #stores flat index of max position for vectorized backward
     
-    #forward pass: take max in each pool_size x pool_size region
+    #forward pass: take max in each pool_size x pool_size region (vectorized)
     def forward(self, X: np.ndarray) -> np.ndarray:
         #X shape: (N, C, H, W)
         #output shape: (N, C, H_out, W_out)
@@ -43,41 +43,41 @@ class MaxPool2D:
         assert (W_in - self.pool_size) % self.stride == 0, \
             f"Width dimension doesn't divide cleanly: (W={W_in} - pool_size={self.pool_size}) % stride={self.stride} != 0"
         
-        #initialize output and argmax cache
-        Y = np.zeros((N, C, H_out, W_out), dtype=X.dtype)
-        #cache stores the position (h, w) in the pool region that had the max value
-        self._argmax = np.zeros((N, C, H_out, W_out, 2), dtype=np.int32)
+        #vectorized pooling using reshape and max over axes
+        #reshape X to extract pooling windows: (N, C, H_out, pool_size, W_out, pool_size)
+        #then max over pool_size axes
         
-        #max pooling using explicit loops
-        for n in range(N):
-            for c in range(C):
-                for h_out in range(H_out):
-                    for w_out in range(W_out):
-                        #calculate input position
-                        h_start = h_out * self.stride
-                        w_start = w_out * self.stride
-                        h_end = h_start + self.pool_size
-                        w_end = w_start + self.pool_size
-                        
-                        #extract input patch
-                        X_patch = X[n, c, h_start:h_end, w_start:w_end]
-                        
-                        #find max value and its position in the patch
-                        max_val = np.max(X_patch)
-                        #find argmax (position of max value) in flattened patch
-                        max_flat_idx = np.argmax(X_patch)
-                        #convert flat index to (h, w) position within the patch
-                        max_h = max_flat_idx // self.pool_size
-                        max_w = max_flat_idx % self.pool_size
-                        
-                        #store output
-                        Y[n, c, h_out, w_out] = max_val
-                        #cache argmax position for backward pass
-                        self._argmax[n, c, h_out, w_out] = [max_h, max_w]
+        #create output and argmax cache
+        Y = np.zeros((N, C, H_out, W_out), dtype=X.dtype)
+        self._argmax = np.zeros((N, C, H_out, W_out), dtype=np.int32)
+        
+        #extract pooling windows using advanced indexing (vectorized)
+        for h_out in range(H_out):
+            for w_out in range(W_out):
+                h_start = h_out * self.stride
+                w_start = w_out * self.stride
+                h_end = h_start + self.pool_size
+                w_end = w_start + self.pool_size
+                
+                #extract patch for all batches and channels: (N, C, pool_size, pool_size)
+                X_patch = X[:, :, h_start:h_end, w_start:w_end]
+                
+                #reshape to flatten spatial dimensions: (N, C, pool_size * pool_size)
+                X_patch_flat = X_patch.reshape(N, C, -1)
+                
+                #find max along flattened spatial dimension: (N, C)
+                max_vals = np.max(X_patch_flat, axis=2)
+                
+                #find argmax (index of max): (N, C)
+                max_indices = np.argmax(X_patch_flat, axis=2)
+                
+                #store output and argmax
+                Y[:, :, h_out, w_out] = max_vals
+                self._argmax[:, :, h_out, w_out] = max_indices
         
         return Y
     
-    #backward pass: route gradient only to the argmax location
+    #backward pass: route gradient only to the argmax location (vectorized)
     def backward(self, dY: np.ndarray) -> np.ndarray:
         #dY shape: (N, C, H_out, W_out)
         #returns dX shape: (N, C, H_in, W_in)
@@ -88,7 +88,7 @@ class MaxPool2D:
         
         #validate dY shape
         assert dY.ndim == 4, f"dY must be 4D (N, C, H, W), got {dY.ndim}D"
-        assert dY.shape == self._argmax.shape[:4], f"dY shape {dY.shape} doesn't match cached output shape {self._argmax.shape[:4]}"
+        assert dY.shape == self._argmax.shape, f"dY shape {dY.shape} doesn't match cached output shape {self._argmax.shape}"
         
         X = self._X
         N, C, H_in, W_in = X.shape
@@ -97,20 +97,36 @@ class MaxPool2D:
         #initialize gradient (zeros everywhere, will set values at argmax positions)
         dX = np.zeros_like(X)
         
-        #backward pass: route gradient only to argmax locations
-        for n in range(N):
-            for c in range(C):
-                for h_out in range(H_out):
-                    for w_out in range(W_out):
-                        #calculate input position
-                        h_start = h_out * self.stride
-                        w_start = w_out * self.stride
-                        
-                        #get argmax position (where the max value was in the patch)
-                        max_h, max_w = self._argmax[n, c, h_out, w_out]
-                        
-                        #route gradient to the position that had the max value
-                        dX[n, c, h_start + max_h, w_start + max_w] += dY[n, c, h_out, w_out]
+        #vectorized backward: route gradients using advanced indexing (eliminates nested loops over n and c)
+        for h_out in range(H_out):
+            for w_out in range(W_out):
+                h_start = h_out * self.stride
+                w_start = w_out * self.stride
+                
+                #get argmax indices for this output position: (N, C)
+                max_indices = self._argmax[:, :, h_out, w_out]
+                
+                #get gradients for this output position: (N, C)
+                dy = dY[:, :, h_out, w_out]
+                
+                #convert flat indices to (h, w) positions within the patch: (N, C)
+                max_h = max_indices // self.pool_size
+                max_w = max_indices % self.pool_size
+                
+                #calculate input positions: (N, C)
+                h_in_positions = h_start + max_h
+                w_in_positions = w_start + max_w
+                
+                #create index arrays for vectorized scatter-add: (N, 1) and (1, C)
+                n_idx = np.arange(N)[:, None]  #(N, 1)
+                c_idx = np.arange(C)[None, :]  #(1, C)
+                
+                #broadcast to match dy shape (N, C) for advanced indexing
+                n_idx_bc = np.broadcast_to(n_idx, (N, C))
+                c_idx_bc = np.broadcast_to(c_idx, (N, C))
+                
+                #vectorized scatter-add: route gradients to argmax positions (eliminates loops over n and c)
+                np.add.at(dX, (n_idx_bc, c_idx_bc, h_in_positions, w_in_positions), dy)
         
         return dX
     

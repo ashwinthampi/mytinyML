@@ -1,7 +1,7 @@
 #conv2d layer implementation
 #implements 2d convolution operation for convolutional neural networks using im2col + GEMM optimization
-#forward pass: uses im2col to extract sliding windows, then matrix multiplication (GEMM)
-#backward pass: uses col2im to reverse im2col and vectorized gradient computation
+#forward pass: uses vectorized im2col (stride tricks) to extract sliding windows, then matrix multiplication (GEMM)
+#backward pass: uses vectorized col2im to reverse im2col and vectorized gradient computation
 #supports stride and padding for flexible convolution operations
 #much faster than loop-based convolution (10x-100x speedup)
 
@@ -43,7 +43,7 @@ class Conv2D:
         self.dW = None
         self.db = None
     
-    #im2col: extract sliding windows into column matrix (batch-major ordering)
+    #im2col: extract sliding windows into column matrix (vectorized using stride tricks)
     #X: (N, C_in, H, W) padded input
     #returns: (N * H_out * W_out, C_in * kernel_size * kernel_size)
     #rows are ordered: batch first, then spatial position (standard im2col layout)
@@ -52,31 +52,50 @@ class Conv2D:
         k = self.kernel_size
         s = self.stride
         
-        #create output column matrix
-        X_col = np.zeros((N * H_out * W_out, C_in * k * k), dtype=X.dtype)
+        #ensure input is contiguous for safe stride computation (safety: manual stride math assumes C-contiguous layout)
+        X = np.ascontiguousarray(X, dtype=np.float32)
         
-        #extract each sliding window and flatten it into a row (batch-major ordering)
-        for n in range(N):
-            for h_out in range(H_out):
-                for w_out in range(W_out):
-                    #calculate input position
-                    h_start = h_out * s
-                    w_start = w_out * s
-                    h_end = h_start + k
-                    w_end = w_start + k
-                    
-                    #extract patch for this batch and all channels
-                    X_patch = X[n, :, h_start:h_end, w_start:w_end]  #(C_in, k, k)
-                    
-                    #row index: batch-major ordering (matches dY_col reshape)
-                    row = n * (H_out * W_out) + (h_out * W_out + w_out)
-                    
-                    #flatten patch and store in column matrix
-                    X_col[row] = X_patch.reshape(-1)
+        #vectorized im2col using stride tricks
+        #create view with shape (N, C_in, H_out, W_out, k, k) using as_strided
+        #this creates a view without copying data
         
-        return X_col
+        #calculate strides for the view
+        #original strides: (C_in * H_in * W_in * itemsize, H_in * W_in * itemsize, W_in * itemsize, itemsize)
+        itemsize = X.itemsize
+        stride_N = C_in * H_in * W_in * itemsize
+        stride_C = H_in * W_in * itemsize
+        stride_H = W_in * itemsize
+        stride_W = itemsize
+        
+        #new strides for view (N, C_in, H_out, W_out, k, k)
+        new_strides = (
+            stride_N,  # batch dimension
+            stride_C,  # channel dimension
+            s * stride_H,  # height output dimension (stride in height)
+            s * stride_W,  # width output dimension (stride in width)
+            stride_H,  # kernel height dimension
+            stride_W,  # kernel width dimension
+        )
+        
+        #create view shape
+        view_shape = (N, C_in, H_out, W_out, k, k)
+        
+        #use as_strided to create view (no copy, just different view of data)
+        X_view = np.lib.stride_tricks.as_strided(
+            X,
+            shape=view_shape,
+            strides=new_strides,
+            writeable=False
+        )
+        
+        #reshape to column format: (N, C_in, H_out, W_out, k, k) -> (N * H_out * W_out, C_in * k * k)
+        #batch-major ordering: flatten batch and spatial dimensions together
+        X_col = X_view.transpose(0, 2, 3, 1, 4, 5).reshape(N * H_out * W_out, C_in * k * k)
+        
+        #copy to ensure contiguous memory (as_strided view may not be contiguous)
+        return np.ascontiguousarray(X_col, dtype=np.float32)
     
-    #col2im: reverse im2col operation (accumulate gradients back to input positions)
+    #col2im: reverse im2col operation (optimized: vectorized across batch/channels, loop over spatial)
     #dX_col: (N * H_out * W_out, C_in * kernel_size * kernel_size)
     #X_shape: (N, C_in, H, W) original input shape
     #returns: (N, C_in, H, W) gradient w.r.t. input
@@ -89,24 +108,22 @@ class Conv2D:
         #initialize output gradient
         dX = np.zeros(X_shape, dtype=dX_col.dtype)
         
-        #accumulate gradients back to input positions (batch-major ordering)
-        for n in range(N):
-            for h_out in range(H_out):
-                for w_out in range(W_out):
-                    #calculate input position
-                    h_start = h_out * s
-                    w_start = w_out * s
-                    h_end = h_start + k
-                    w_end = w_start + k
-                    
-                    #row index: batch-major ordering (matches im2col)
-                    row = n * (H_out * W_out) + (h_out * W_out + w_out)
-                    
-                    #get column for this position
-                    dX_patch = dX_col[row].reshape(C_in, k, k)
-                    
-                    #accumulate gradient back to input position
-                    dX[n, :, h_start:h_end, w_start:w_end] += dX_patch
+        #reshape dX_col to match im2col structure: (N * H_out * W_out, C_in * k * k) -> (N, H_out, W_out, C_in, k, k)
+        dX_col_reshaped = dX_col.reshape(N, H_out, W_out, C_in, k, k)
+        
+        #optimized: loop over spatial dimensions (smaller overhead) but vectorize across batch/channels
+        for h_out in range(H_out):
+            for w_out in range(W_out):
+                h_start = h_out * s
+                w_start = w_out * s
+                h_end = h_start + k
+                w_end = w_start + k
+                
+                #extract gradients for this output position: (N, C_in, k, k)
+                dX_patch = dX_col_reshaped[:, h_out, w_out, :, :, :]
+                
+                #accumulate gradient back to input position (vectorized across batch and channels)
+                dX[:, :, h_start:h_end, w_start:w_end] += dX_patch
         
         return dX
     
@@ -151,15 +168,12 @@ class Conv2D:
         #cache padded input shape for backward pass
         self._X_padded_shape = X_padded.shape
         
-        #im2col: extract sliding windows into column matrix
+        #im2col: extract sliding windows into column matrix (vectorized)
         #X_col shape: (N * H_out * W_out, C_in * kernel_size * kernel_size)
         X_col = self._im2col(X_padded, H_out, W_out)
         
         #cache X_col for backward pass
         self._X_col = X_col
-        
-        #ensure contiguous arrays for optimal GEMM performance
-        X_col = np.ascontiguousarray(X_col, dtype=np.float32)
         
         #flatten filters: (C_out, C_in, kH, kW) -> (C_out, C_in * kH * kW)
         W_col = self.W.reshape(self.out_channels, -1)
@@ -195,8 +209,6 @@ class Conv2D:
         #reshape dY to column format: (N, C_out, H_out, W_out) -> (N * H_out * W_out, C_out)
         #batch-major ordering (matches im2col)
         dY_col = dY.transpose(0, 2, 3, 1).reshape(-1, C_out)
-        
-        #ensure contiguous arrays for optimal GEMM performance
         dY_col = np.ascontiguousarray(dY_col, dtype=np.float32)
         
         #flatten filters: (C_out, C_in, kH, kW) -> (C_out, C_in * kH * kW)
@@ -217,7 +229,7 @@ class Conv2D:
         #dX_col shape: (N * H_out * W_out, C_in * kH * kW)
         dX_col = dY_col @ W_col
         
-        #col2im: reverse im2col to get dX_padded (use cached padded shape)
+        #col2im: reverse im2col to get dX_padded (use cached padded shape, vectorized)
         dX_padded = self._col2im(dX_col, self._X_padded_shape, H_out, W_out)
         
         #remove padding from dX

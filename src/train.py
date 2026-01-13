@@ -52,7 +52,7 @@ def main():
 
     #number of epochs and batch size
     epochs = 50
-    batch_size = 128
+    batch_size = 256  #increased for better BLAS efficiency and fewer Python iterations
     
     #l2 weight decay parameter
     weight_decay = 1e-4
@@ -105,13 +105,13 @@ def main():
         #set model to evaluation mode (disables dropout, etc.)
         model.eval()
         
-        #evaluate on training and validation sets
+        #evaluate on training and validation sets (use subset for speed)
         train_probs = model.forward(X_train[:5000])
-        val_probs = model.forward(X_val)
+        val_probs = model.forward(X_val[:5000])  #evaluate on subset for speed (full val is expensive)
         
         train_acc = accuracy(train_probs, y_train[:5000])
-        val_acc = accuracy(val_probs, y_val)
-        val_loss = loss_fn.forward(val_probs, y_val)
+        val_acc = accuracy(val_probs, y_val[:5000])
+        val_loss = loss_fn.forward(val_probs, y_val[:5000])
 
         print(
             f"Epoch {epoch+1}/{epochs}, "
