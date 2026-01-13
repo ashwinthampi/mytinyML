@@ -4,6 +4,7 @@
 #evaluates on test set only at the end
 
 import numpy as np
+import time
 from typing import Generator
 from sklearn.model_selection import train_test_split
 
@@ -62,9 +63,14 @@ def main():
     best_val_loss = float('inf')
     patience_counter = 0
     best_model_params = None
+    
+    #track training time
+    training_start_time = time.time()
+    epoch_times = []
 
     #train the model
     for epoch in range(epochs):
+        epoch_start_time = time.time()
         #set model to training mode (enables dropout, etc.)
         model.train()
         
@@ -113,12 +119,17 @@ def main():
         val_acc = accuracy(val_probs, y_val[:5000])
         val_loss = loss_fn.forward(val_probs, y_val[:5000])
 
+        #calculate epoch time
+        epoch_time = time.time() - epoch_start_time
+        epoch_times.append(epoch_time)
+        
         print(
             f"Epoch {epoch+1}/{epochs}, "
             f"Train Loss: {epoch_loss/num_batches:.4f}, "
             f"Train Acc: {train_acc:.4f}, "
             f"Val Loss: {val_loss:.4f}, "
-            f"Val Acc: {val_acc:.4f}"
+            f"Val Acc: {val_acc:.4f}, "
+            f"Time: {epoch_time:.2f}s"
         )
         
         #early stopping: check if validation loss improved
@@ -134,10 +145,26 @@ def main():
                 print(f"  -> Early stopping triggered after {epoch+1} epochs")
                 break
 
+    #calculate total training time
+    total_training_time = time.time() - training_start_time
+    
     #restore best model parameters
     if best_model_params is not None:
         model.set_parameters(best_model_params)
         print(f"\nRestored best model (val loss: {best_val_loss:.4f})")
+    
+    #print training time summary
+    print("\n" + "="*60)
+    print("TRAINING TIME SUMMARY")
+    print("="*60)
+    if epoch_times:
+        avg_epoch_time = np.mean(epoch_times)
+        print(f"Total epochs trained: {len(epoch_times)}")
+        print(f"Average time per epoch: {avg_epoch_time:.2f}s ({avg_epoch_time/60:.2f} min)")
+        print(f"Fastest epoch: {min(epoch_times):.2f}s")
+        print(f"Slowest epoch: {max(epoch_times):.2f}s")
+    print(f"Total training time: {total_training_time:.2f}s ({total_training_time/60:.2f} min / {total_training_time/3600:.2f} hours)")
+    print("="*60 + "\n")
     
     #evaluate on test set (only at the end)
     model.eval()
