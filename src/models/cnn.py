@@ -11,19 +11,22 @@ from layers.relu import ReLU
 from layers.maxpool2d import MaxPool2D
 from layers.flatten import Flatten
 from layers.dropout import Dropout
+from layers.batchnorm2d import BatchNorm2D
 
 class CNN:
     def __init__(self, seed: int = 42):
         #build layers: conv layers -> pooling -> flatten -> fully-connected layers
         self.layers = []
         
-        #conv block 1: conv -> relu -> pool
+        #conv block 1: conv -> batchnorm -> relu -> pool
         self.layers.append(Conv2D(in_channels=1, out_channels=16, kernel_size=3, stride=1, padding=1, seed=seed))
+        self.layers.append(BatchNorm2D(num_channels=16))
         self.layers.append(ReLU())
         self.layers.append(MaxPool2D(pool_size=2, stride=2))
         
-        #conv block 2: conv -> relu -> pool
+        #conv block 2: conv -> batchnorm -> relu -> pool
         self.layers.append(Conv2D(in_channels=16, out_channels=32, kernel_size=3, stride=1, padding=1, seed=seed + 1))
+        self.layers.append(BatchNorm2D(num_channels=32))
         self.layers.append(ReLU())
         self.layers.append(MaxPool2D(pool_size=2, stride=2))
         
@@ -61,9 +64,10 @@ class CNN:
         for layer in reversed(self.layers):
             grad = layer.backward(grad)
         
-        #collect gradients from all parameterized layers (conv2d and linear) with unique keys
+        #collect gradients from all parameterized layers (conv2d, batchnorm, and linear) with unique keys
         grads = {}
         conv_idx = 0
+        bn_idx = 0
         linear_idx = 0
         for layer in self.layers:
             if isinstance(layer, Conv2D):
@@ -71,6 +75,11 @@ class CNN:
                 grads[f"conv_W{conv_idx}"] = layer_grads["W"]
                 grads[f"conv_b{conv_idx}"] = layer_grads["b"]
                 conv_idx += 1
+            elif isinstance(layer, BatchNorm2D):
+                layer_grads = layer.gradients()
+                grads[f"bn_gamma{bn_idx}"] = layer_grads["gamma"]
+                grads[f"bn_beta{bn_idx}"] = layer_grads["beta"]
+                bn_idx += 1
             elif isinstance(layer, Linear):
                 layer_grads = layer.gradients()
                 grads[f"linear_W{linear_idx}"] = layer_grads["W"]
@@ -79,10 +88,11 @@ class CNN:
         
         return grads
     
-    #return all model parameters with unique keys
+    #return all model parameters with unique keys (including batch norm running statistics)
     def parameters(self) -> dict[str, np.ndarray]:
         params = {}
         conv_idx = 0
+        bn_idx = 0
         linear_idx = 0
         for layer in self.layers:
             if isinstance(layer, Conv2D):
@@ -90,6 +100,14 @@ class CNN:
                 params[f"conv_W{conv_idx}"] = layer_params["W"]
                 params[f"conv_b{conv_idx}"] = layer_params["b"]
                 conv_idx += 1
+            elif isinstance(layer, BatchNorm2D):
+                layer_params = layer.parameters()
+                params[f"bn_gamma{bn_idx}"] = layer_params["gamma"]
+                params[f"bn_beta{bn_idx}"] = layer_params["beta"]
+                #also save running statistics for inference
+                params[f"bn_running_mean{bn_idx}"] = layer.running_mean
+                params[f"bn_running_var{bn_idx}"] = layer.running_var
+                bn_idx += 1
             elif isinstance(layer, Linear):
                 layer_params = layer.parameters()
                 params[f"linear_W{linear_idx}"] = layer_params["W"]
@@ -97,27 +115,37 @@ class CNN:
                 linear_idx += 1
         return params
     
-    #set model to training mode (enables dropout, etc.)
+    #set model to training mode (enables dropout, batch norm training, etc.)
     def train(self) -> None:
         for layer in self.layers:
-            if hasattr(layer, "training"):
-                layer.training = True
+            if hasattr(layer, "train"):
+                layer.train()
     
-    #set model to evaluation mode (disables dropout, etc.)
+    #set model to evaluation mode (disables dropout, uses batch norm running stats, etc.)
     def eval(self) -> None:
         for layer in self.layers:
-            if hasattr(layer, "training"):
-                layer.training = False
+            if hasattr(layer, "eval"):
+                layer.eval()
     
-    #set model parameters from a dictionary
+    #set model parameters from a dictionary (including batch norm running statistics)
     def set_parameters(self, params: dict[str, np.ndarray]) -> None:
         conv_idx = 0
+        bn_idx = 0
         linear_idx = 0
         for layer in self.layers:
             if isinstance(layer, Conv2D):
                 layer.W = params[f"conv_W{conv_idx}"]
                 layer.b = params[f"conv_b{conv_idx}"]
                 conv_idx += 1
+            elif isinstance(layer, BatchNorm2D):
+                layer.gamma = params[f"bn_gamma{bn_idx}"]
+                layer.beta = params[f"bn_beta{bn_idx}"]
+                #also restore running statistics for inference
+                if f"bn_running_mean{bn_idx}" in params:
+                    layer.running_mean = params[f"bn_running_mean{bn_idx}"]
+                if f"bn_running_var{bn_idx}" in params:
+                    layer.running_var = params[f"bn_running_var{bn_idx}"]
+                bn_idx += 1
             elif isinstance(layer, Linear):
                 layer.W = params[f"linear_W{linear_idx}"]
                 layer.b = params[f"linear_b{linear_idx}"]
