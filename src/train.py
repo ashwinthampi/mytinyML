@@ -11,6 +11,7 @@ from typing import Generator
 from sklearn.model_selection import train_test_split
 
 from datasets.mnist import load_mnist
+from datasets.augmentation import augment_batch
 from models.cnn import CNN
 from losses.cross_entropy import CrossEntropyLoss
 from optim.adam import Adam
@@ -55,6 +56,11 @@ def parse_args():
                         help="Number of warmup epochs (0 = no warmup)")
     parser.add_argument("--warmup-start-lr", type=float, default=1e-6,
                         help="Starting lr for warmup phase")
+
+    #data augmentation
+    parser.add_argument("--augment", action="store_true", help="Enable data augmentation")
+    parser.add_argument("--max-shift", type=int, default=2, help="Max pixel shift for augmentation")
+    parser.add_argument("--max-angle", type=float, default=15.0, help="Max rotation angle in degrees")
 
     #output
     parser.add_argument("--save-path", type=str, default="cnn_mnist.npz", help="Path to save model")
@@ -141,6 +147,11 @@ def main():
         num_batches = 0
 
         for Xb, yb in iterate_minibatches(X_train, y_train, batch_size, seed=epoch):
+            #apply data augmentation if enabled (training only)
+            if args.augment:
+                Xb = augment_batch(Xb, rng=np.random.default_rng(seed=epoch * 10000 + num_batches),
+                                   max_shift=args.max_shift, max_angle=args.max_angle)
+
             probs = model.forward(Xb)
 
             loss = loss_fn.forward(probs, yb)
