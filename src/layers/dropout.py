@@ -3,8 +3,10 @@
 #forward pass: randomly sets activations to zero during training, scales by 1/(1-p)
 #backward pass: propagates gradients only through active units
 #optimized: pre-scales mask once (avoids dividing by (1-p) separately in forward and backward)
+#supports GPU acceleration via CuPy backend
 
 import numpy as np
+import backend
 
 class Dropout:
     def __init__(self, p: float = 0.5):
@@ -18,11 +20,12 @@ class Dropout:
         self.training = True
 
     #forward pass: apply dropout mask during training
-    def forward(self, X: np.ndarray) -> np.ndarray:
+    def forward(self, X):
+        xp = backend.xp
         if self.training:
             #generate random mask and pre-scale by 1/(1-p) once
             #reuse the same scaled mask in backward (avoids redundant division)
-            mask = (np.random.random(X.shape) > self.p).astype(np.float32)
+            mask = (xp.random.random(X.shape) > self.p).astype(np.float32)
             self._scaled_mask = mask * self._scale
             X = X * self._scaled_mask
         else:
@@ -31,7 +34,7 @@ class Dropout:
         return X
 
     #backward pass: propagate gradients only through active units
-    def backward(self, dA: np.ndarray) -> np.ndarray:
+    def backward(self, dA):
         if self.training and self._scaled_mask is not None:
             #pre-scaled mask already includes the 1/(1-p) factor
             dX = dA * self._scaled_mask
@@ -40,5 +43,5 @@ class Dropout:
         return dX
 
     #return the layer parameters (empty for dropout since it has no learnable parameters)
-    def parameters(self) -> dict[str, np.ndarray]:
+    def parameters(self) -> dict:
         return {}

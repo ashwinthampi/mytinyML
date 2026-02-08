@@ -3,8 +3,10 @@
 #uses conv2d, relu, maxpool2d, flatten, linear, and dropout layers
 #forward pass: loops through layers sequentially
 #backward pass: propagates gradients through all layers in reverse
+#supports GPU acceleration via CuPy backend
 
 import numpy as np
+import backend
 from layers.conv2d import Conv2D
 from layers.linear import Linear
 from layers.relu import ReLU
@@ -38,32 +40,49 @@ class CNN:
         self.layers.append(ReLU())
         self.layers.append(Dropout(p=dropout))
         self.layers.append(Linear(in_features=128, out_features=10, seed=seed + 3))
-    
+
+    #move all learnable parameters to the active device (call after backend.use_gpu())
+    def to_device(self):
+        xp = backend.xp
+        for layer in self.layers:
+            if isinstance(layer, Conv2D):
+                layer.W = xp.asarray(layer.W)
+                layer.b = xp.asarray(layer.b)
+            elif isinstance(layer, Linear):
+                layer.W = xp.asarray(layer.W)
+                layer.b = xp.asarray(layer.b)
+            elif isinstance(layer, BatchNorm2D):
+                layer.gamma = xp.asarray(layer.gamma)
+                layer.beta = xp.asarray(layer.beta)
+                layer.running_mean = xp.asarray(layer.running_mean)
+                layer.running_var = xp.asarray(layer.running_var)
+
     #softmax activation function that takes raw scores and returns probabilities
     @staticmethod
-    def softmax(Z: np.ndarray) -> np.ndarray:
-        Z = Z - np.max(Z, axis=1, keepdims=True)
-        expZ = np.exp(Z)
-        return expZ / np.sum(expZ, axis=1, keepdims=True)
-    
+    def softmax(Z):
+        xp = backend.xp
+        Z = Z - xp.max(Z, axis=1, keepdims=True)
+        expZ = xp.exp(Z)
+        return expZ / xp.sum(expZ, axis=1, keepdims=True)
+
     #forward pass through the network
-    def forward(self, X: np.ndarray) -> np.ndarray:
+    def forward(self, X):
         #loop through all layers
         x = X
         for layer in self.layers:
             x = layer.forward(x)
-        
+
         #apply softmax to final output
         P = self.softmax(x)
         return P
-    
+
     #backward pass through the network
-    def backward(self, dZ: np.ndarray) -> dict[str, np.ndarray]:
+    def backward(self, dZ):
         #backward through all layers in reverse order
         grad = dZ
         for layer in reversed(self.layers):
             grad = layer.backward(grad)
-        
+
         #collect gradients from all parameterized layers (conv2d, batchnorm, and linear) with unique keys
         grads = {}
         conv_idx = 0
@@ -85,11 +104,11 @@ class CNN:
                 grads[f"linear_W{linear_idx}"] = layer_grads["W"]
                 grads[f"linear_b{linear_idx}"] = layer_grads["b"]
                 linear_idx += 1
-        
+
         return grads
-    
+
     #return all model parameters with unique keys (including batch norm running statistics)
-    def parameters(self) -> dict[str, np.ndarray]:
+    def parameters(self) -> dict:
         params = {}
         conv_idx = 0
         bn_idx = 0
@@ -114,21 +133,21 @@ class CNN:
                 params[f"linear_b{linear_idx}"] = layer_params["b"]
                 linear_idx += 1
         return params
-    
+
     #set model to training mode (enables dropout, batch norm training, etc.)
     def train(self) -> None:
         for layer in self.layers:
             if hasattr(layer, "train"):
                 layer.train()
-    
+
     #set model to evaluation mode (disables dropout, uses batch norm running stats, etc.)
     def eval(self) -> None:
         for layer in self.layers:
             if hasattr(layer, "eval"):
                 layer.eval()
-    
+
     #set model parameters from a dictionary (including batch norm running statistics)
-    def set_parameters(self, params: dict[str, np.ndarray]) -> None:
+    def set_parameters(self, params: dict) -> None:
         conv_idx = 0
         bn_idx = 0
         linear_idx = 0

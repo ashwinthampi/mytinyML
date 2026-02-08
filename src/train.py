@@ -2,6 +2,7 @@
 #trains the model on mnist dataset using adam optimizer
 #uses validation split and early stopping for better generalization
 #evaluates on test set only at the end
+#supports GPU acceleration via --device gpu flag (requires CuPy)
 
 import argparse
 import csv
@@ -10,6 +11,7 @@ import time
 from typing import Generator
 from sklearn.model_selection import train_test_split
 
+import backend
 from datasets.mnist import load_mnist
 from datasets.augmentation import augment_batch
 from models.cnn import CNN
@@ -37,6 +39,10 @@ def parse_args():
     #model
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--dropout", type=float, default=0.2, help="Dropout probability")
+
+    #device selection
+    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "gpu"],
+                        help="Device to train on (cpu or gpu, gpu requires CuPy)")
 
     #learning rate scheduling
     parser.add_argument("--scheduler", type=str, default="none",
@@ -68,12 +74,13 @@ def parse_args():
     return parser.parse_args()
 
 #accuracy function that takes the probabilities and the true labels and returns the accuracy
-def accuracy(probs: np.ndarray, y: np.ndarray) -> float:
-    preds = np.argmax(probs, axis=1)
-    return float(np.mean(preds == y))
+def accuracy(probs, y) -> float:
+    xp = backend.xp
+    preds = xp.argmax(probs, axis=1)
+    return float(xp.mean(preds == y))
 
 #iterate over the data in mini-batches
-def iterate_minibatches(X: np.ndarray, y: np.ndarray, batch_size: int, seed: int = 42) -> Generator[tuple[np.ndarray, np.ndarray], None, None]:
+def iterate_minibatches(X, y, batch_size: int, seed: int = 42) -> Generator:
     rng = np.random.default_rng(seed=seed)
     N = X.shape[0]
     indices = np.arange(N)
@@ -87,6 +94,15 @@ def iterate_minibatches(X: np.ndarray, y: np.ndarray, batch_size: int, seed: int
 def main():
     args = parse_args()
 
+    #set device (must be done before creating model so layers use correct backend)
+    if args.device == "gpu":
+        backend.use_gpu()
+        print("Using GPU (CuPy) backend")
+    else:
+        print("Using CPU (NumPy) backend")
+
+    xp = backend.xp
+
     #load mnist data without flattening (for cnn: shape will be (N, 1, 28, 28))
     X_train_full, y_train_full, X_test, y_test = load_mnist(flatten=False)
 
@@ -95,8 +111,20 @@ def main():
         X_train_full, y_train_full, test_size=0.1, random_state=args.seed, stratify=y_train_full
     )
 
+    #move data to device (GPU transfers data once upfront, avoids per-batch transfers)
+    X_train = backend.to_device(X_train)
+    X_val = backend.to_device(X_val)
+    X_test = backend.to_device(X_test)
+    y_train = backend.to_device(y_train)
+    y_val = backend.to_device(y_val)
+    y_test = backend.to_device(y_test)
+
     #initialize the model, loss function, and optimizer
     model = CNN(seed=args.seed, dropout=args.dropout)
+    #move model parameters to device
+    if backend.is_gpu():
+        model.to_device()
+
     loss_fn = CrossEntropyLoss()
 
     if args.optimizer == "adam":
@@ -148,9 +176,12 @@ def main():
 
         for Xb, yb in iterate_minibatches(X_train, y_train, batch_size, seed=epoch):
             #apply data augmentation if enabled (training only)
+            #augmentation runs on CPU (complex indexing), then transfers result to device
             if args.augment:
-                Xb = augment_batch(Xb, rng=np.random.default_rng(seed=epoch * 10000 + num_batches),
-                                   max_shift=args.max_shift, max_angle=args.max_angle)
+                Xb_cpu = backend.to_numpy(Xb)
+                Xb_cpu = augment_batch(Xb_cpu, rng=np.random.default_rng(seed=epoch * 10000 + num_batches),
+                                       max_shift=args.max_shift, max_angle=args.max_angle)
+                Xb = backend.to_device(Xb_cpu)
 
             probs = model.forward(Xb)
 
@@ -162,7 +193,7 @@ def main():
             grads = model.backward(dZ2)
 
             #track gradient norm before weight decay
-            grad_norm = np.sqrt(sum(np.sum(g**2) for g in grads.values()))
+            grad_norm = float(xp.sqrt(sum(xp.sum(g * g) for g in grads.values())))
             epoch_grad_norm += grad_norm
 
             #add l2 weight decay to gradients (only for weights, not biases)
@@ -247,6 +278,7 @@ def main():
     print("\n" + "="*60)
     print("TRAINING TIME SUMMARY")
     print("="*60)
+    print(f"Device: {args.device.upper()}")
     if epoch_times:
         avg_epoch_time = np.mean(epoch_times)
         print(f"Total epochs trained: {len(epoch_times)}")
@@ -265,16 +297,20 @@ def main():
 
     print(f"Test Loss: {test_loss:.4f}, Test Acc: {test_acc:.4f}")
 
-    preds = np.argmax(test_probs, axis=1)
-    cm = confusion_matrix(y_test, preds, 10)
+    #move predictions back to CPU for metrics
+    preds = backend.to_numpy(xp.argmax(test_probs, axis=1))
+    y_test_cpu = backend.to_numpy(y_test)
+
+    cm = confusion_matrix(y_test_cpu, preds, 10)
     print("\nConfusion Matrix:")
     print(cm)
 
     #print classification report with per-class precision, recall, f1
     print("\nClassification Report:")
-    print(classification_report(y_test, preds, 10))
+    print(classification_report(y_test_cpu, preds, 10))
 
-    #save the model with metadata
+    #save the model with metadata (move params to CPU for saving)
+    save_params = {k: backend.to_numpy(v) for k, v in model.parameters().items()}
     metadata = {
         "model_type": "CNN",
         "architecture": {
@@ -294,9 +330,10 @@ def main():
             "lr": args.lr,
             "batch_size": args.batch_size,
             "weight_decay": args.weight_decay,
+            "device": args.device,
         },
     }
-    save_model(args.save_path, model.parameters(), metadata=metadata)
+    save_model(args.save_path, save_params, metadata=metadata)
 
     #save training log to csv
     if training_log:
