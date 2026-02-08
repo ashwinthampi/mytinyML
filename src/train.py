@@ -15,6 +15,7 @@ from models.cnn import CNN
 from losses.cross_entropy import CrossEntropyLoss
 from optim.adam import Adam
 from optim.sgd import SGD
+from optim.scheduler import StepLR, CosineAnnealingLR, ReduceOnPlateau
 from utils.io import save_model
 from utils.metrics import confusion_matrix, classification_report
 
@@ -35,6 +36,21 @@ def parse_args():
     #model
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--dropout", type=float, default=0.2, help="Dropout probability")
+
+    #learning rate scheduling
+    parser.add_argument("--scheduler", type=str, default="none",
+                        choices=["none", "step", "cosine", "plateau"],
+                        help="Learning rate scheduler")
+    parser.add_argument("--step-size", type=int, default=10,
+                        help="StepLR: decay every N epochs")
+    parser.add_argument("--gamma", type=float, default=0.1,
+                        help="StepLR: decay factor")
+    parser.add_argument("--eta-min", type=float, default=1e-6,
+                        help="CosineAnnealing: minimum lr")
+    parser.add_argument("--scheduler-patience", type=int, default=10,
+                        help="ReduceOnPlateau: patience")
+    parser.add_argument("--scheduler-factor", type=float, default=0.5,
+                        help="ReduceOnPlateau: reduction factor")
 
     #output
     parser.add_argument("--save-path", type=str, default="cnn_mnist.npz", help="Path to save model")
@@ -77,6 +93,16 @@ def main():
         optimizer = Adam(lr=args.lr)
     elif args.optimizer == "sgd":
         optimizer = SGD(lr=args.lr)
+
+    #create learning rate scheduler
+    scheduler = None
+    if args.scheduler == "step":
+        scheduler = StepLR(optimizer, step_size=args.step_size, gamma=args.gamma)
+    elif args.scheduler == "cosine":
+        scheduler = CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=args.eta_min)
+    elif args.scheduler == "plateau":
+        scheduler = ReduceOnPlateau(optimizer, mode="min", factor=args.scheduler_factor,
+                                     patience=args.scheduler_patience)
 
     #hyperparameters from args
     epochs = args.epochs
@@ -181,6 +207,10 @@ def main():
             if patience_counter >= patience:
                 print(f"  -> Early stopping triggered after {epoch+1} epochs")
                 break
+
+        #step the learning rate scheduler
+        if scheduler is not None:
+            scheduler.step(metric=val_loss)
 
     #calculate total training time
     total_training_time = time.time() - training_start_time
