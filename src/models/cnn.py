@@ -14,29 +14,29 @@ from layers.dropout import Dropout
 from layers.batchnorm2d import BatchNorm2D
 
 class CNN:
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42, dropout: float = 0.2):
         #build layers: conv layers -> pooling -> flatten -> fully-connected layers
         self.layers = []
-        
+
         #conv block 1: conv -> batchnorm -> relu -> pool
         self.layers.append(Conv2D(in_channels=1, out_channels=16, kernel_size=3, stride=1, padding=1, seed=seed))
         self.layers.append(BatchNorm2D(num_channels=16))
         self.layers.append(ReLU())
         self.layers.append(MaxPool2D(pool_size=2, stride=2))
-        
+
         #conv block 2: conv -> batchnorm -> relu -> pool
         self.layers.append(Conv2D(in_channels=16, out_channels=32, kernel_size=3, stride=1, padding=1, seed=seed + 1))
         self.layers.append(BatchNorm2D(num_channels=32))
         self.layers.append(ReLU())
         self.layers.append(MaxPool2D(pool_size=2, stride=2))
-        
+
         #flatten: (N, C, H, W) -> (N, C*H*W)
         self.layers.append(Flatten())
-        
+
         #fully-connected layers: linear -> relu -> dropout -> linear
         self.layers.append(Linear(in_features=32 * 7 * 7, out_features=128, seed=seed + 2))
         self.layers.append(ReLU())
-        self.layers.append(Dropout(p=0.2))
+        self.layers.append(Dropout(p=dropout))
         self.layers.append(Linear(in_features=128, out_features=10, seed=seed + 3))
     
     #softmax activation function that takes raw scores and returns probabilities
