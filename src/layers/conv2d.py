@@ -95,36 +95,36 @@ class Conv2D:
         #copy to ensure contiguous memory (as_strided view may not be contiguous)
         return np.ascontiguousarray(X_col, dtype=np.float32)
     
-    #col2im: reverse im2col operation (optimized: vectorized across batch/channels, loop over spatial)
+    #col2im: reverse im2col operation (optimized: loop over kernel positions, not spatial positions)
     #dX_col: (N * H_out * W_out, C_in * kernel_size * kernel_size)
     #X_shape: (N, C_in, H, W) original input shape
     #returns: (N, C_in, H, W) gradient w.r.t. input
     #uses same batch-major ordering as im2col
+    #key optimization: loops k*k times (e.g. 9 for 3x3) instead of H_out*W_out times (e.g. 784 for 28x28)
     def _col2im(self, dX_col: np.ndarray, X_shape: tuple, H_out: int, W_out: int) -> np.ndarray:
         N, C_in, H_in, W_in = X_shape
         k = self.kernel_size
         s = self.stride
-        
+
         #initialize output gradient
         dX = np.zeros(X_shape, dtype=dX_col.dtype)
-        
-        #reshape dX_col to match im2col structure: (N * H_out * W_out, C_in * k * k) -> (N, H_out, W_out, C_in, k, k)
+
+        #reshape dX_col: (N*H_out*W_out, C_in*k*k) -> (N, H_out, W_out, C_in, k, k)
         dX_col_reshaped = dX_col.reshape(N, H_out, W_out, C_in, k, k)
-        
-        #optimized: loop over spatial dimensions (smaller overhead) but vectorize across batch/channels
-        for h_out in range(H_out):
-            for w_out in range(W_out):
-                h_start = h_out * s
-                w_start = w_out * s
-                h_end = h_start + k
-                w_end = w_start + k
-                
-                #extract gradients for this output position: (N, C_in, k, k)
-                dX_patch = dX_col_reshaped[:, h_out, w_out, :, :, :]
-                
-                #accumulate gradient back to input position (vectorized across batch and channels)
-                dX[:, :, h_start:h_end, w_start:w_end] += dX_patch
-        
+
+        #loop over kernel positions (k*k iterations) instead of spatial positions (H_out*W_out iterations)
+        #for each kernel offset (kh, kw), all spatial positions contribute simultaneously
+        #dX[:, :, kh + h_out*s, kw + w_out*s] += dX_col_reshaped[:, h_out, w_out, :, kh, kw]
+        #with stride=1 this becomes a simple slice: dX[:, :, kh:kh+H_out, kw:kw+W_out]
+        for kh in range(k):
+            for kw in range(k):
+                #extract gradient contributions for this kernel position: (N, H_out, W_out, C_in)
+                #transpose to (N, C_in, H_out, W_out) to match dX layout
+                patch = dX_col_reshaped[:, :, :, :, kh, kw].transpose(0, 3, 1, 2)
+
+                #accumulate into the correct input positions (vectorized across batch, channels, and all spatial positions)
+                dX[:, :, kh:kh + H_out * s:s, kw:kw + W_out * s:s] += patch
+
         return dX
     
     #forward pass: convolve input with filters using im2col + GEMM
