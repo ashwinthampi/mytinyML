@@ -15,7 +15,7 @@ from models.cnn import CNN
 from losses.cross_entropy import CrossEntropyLoss
 from optim.adam import Adam
 from optim.sgd import SGD
-from optim.scheduler import StepLR, CosineAnnealingLR, ReduceOnPlateau
+from optim.scheduler import StepLR, CosineAnnealingLR, ReduceOnPlateau, WarmupScheduler
 from utils.io import save_model
 from utils.metrics import confusion_matrix, classification_report
 
@@ -51,6 +51,10 @@ def parse_args():
                         help="ReduceOnPlateau: patience")
     parser.add_argument("--scheduler-factor", type=float, default=0.5,
                         help="ReduceOnPlateau: reduction factor")
+    parser.add_argument("--warmup-epochs", type=int, default=0,
+                        help="Number of warmup epochs (0 = no warmup)")
+    parser.add_argument("--warmup-start-lr", type=float, default=1e-6,
+                        help="Starting lr for warmup phase")
 
     #output
     parser.add_argument("--save-path", type=str, default="cnn_mnist.npz", help="Path to save model")
@@ -103,6 +107,12 @@ def main():
     elif args.scheduler == "plateau":
         scheduler = ReduceOnPlateau(optimizer, mode="min", factor=args.scheduler_factor,
                                      patience=args.scheduler_patience)
+
+    #wrap scheduler with warmup if requested
+    if args.warmup_epochs > 0:
+        scheduler = WarmupScheduler(optimizer, inner_scheduler=scheduler,
+                                     warmup_epochs=args.warmup_epochs,
+                                     warmup_start_lr=args.warmup_start_lr)
 
     #hyperparameters from args
     epochs = args.epochs

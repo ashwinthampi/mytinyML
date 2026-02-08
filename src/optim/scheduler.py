@@ -81,3 +81,35 @@ class ReduceOnPlateau:
 
     def get_lr(self) -> float:
         return self.optimizer.lr
+
+
+class WarmupScheduler:
+    """Wraps any scheduler with a linear warmup phase.
+
+    During warmup_epochs, lr linearly increases from warmup_start_lr to base_lr.
+    After warmup, delegates to the inner scheduler (if any).
+    """
+
+    def __init__(self, optimizer, inner_scheduler=None, warmup_epochs: int = 5,
+                 warmup_start_lr: float = 1e-6):
+        self.optimizer = optimizer
+        self.inner_scheduler = inner_scheduler
+        self.warmup_epochs = warmup_epochs
+        self.warmup_start_lr = warmup_start_lr
+        self.base_lr = optimizer.lr
+        self.last_epoch = 0
+
+    def step(self, metric: float | None = None) -> None:
+        self.last_epoch += 1
+
+        if self.last_epoch <= self.warmup_epochs:
+            #linear warmup from warmup_start_lr to base_lr
+            alpha = self.last_epoch / self.warmup_epochs
+            self.optimizer.lr = self.warmup_start_lr + alpha * (self.base_lr - self.warmup_start_lr)
+        else:
+            #after warmup, delegate to inner scheduler
+            if self.inner_scheduler is not None:
+                self.inner_scheduler.step(metric=metric)
+
+    def get_lr(self) -> float:
+        return self.optimizer.lr
