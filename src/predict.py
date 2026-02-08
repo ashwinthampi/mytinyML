@@ -7,12 +7,18 @@ import matplotlib.pyplot as plt
 
 from datasets.mnist import load_mnist
 from models.cnn import CNN
-from utils.io import load_model
+from utils.io import load_model_with_metadata
 
 #predict the digit from the image
 def main():
-    #load saved cnn parameters
-    params = load_model("cnn_mnist.npz")
+    #load saved cnn parameters and metadata
+    params, metadata = load_model_with_metadata("cnn_mnist.npz")
+    if metadata:
+        print(f"Model type: {metadata.get('model_type', 'unknown')}")
+        training_info = metadata.get("training", {})
+        if "test_acc" in training_info:
+            print(f"Trained test accuracy: {training_info['test_acc']:.4f}")
+        print()
 
     #create cnn model and load parameters
     model = CNN()

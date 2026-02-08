@@ -221,8 +221,29 @@ def main():
     print("\nClassification Report:")
     print(classification_report(y_test, preds, 10))
 
-    #save the model
-    save_model(args.save_path, model.parameters())
+    #save the model with metadata
+    metadata = {
+        "model_type": "CNN",
+        "architecture": {
+            "conv_blocks": [
+                {"in_channels": 1, "out_channels": 16, "kernel_size": 3, "padding": 1},
+                {"in_channels": 16, "out_channels": 32, "kernel_size": 3, "padding": 1},
+            ],
+            "fc_layers": [{"in": 1568, "out": 128}, {"in": 128, "out": 10}],
+            "dropout": args.dropout,
+        },
+        "training": {
+            "epochs_trained": len(epoch_times),
+            "best_val_loss": float(best_val_loss),
+            "test_acc": float(test_acc),
+            "test_loss": float(test_loss),
+            "optimizer": args.optimizer,
+            "lr": args.lr,
+            "batch_size": args.batch_size,
+            "weight_decay": args.weight_decay,
+        },
+    }
+    save_model(args.save_path, model.parameters(), metadata=metadata)
 
     #save training log to csv
     if training_log:
