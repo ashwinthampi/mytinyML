@@ -4,6 +4,7 @@
 #evaluates on test set only at the end
 
 import argparse
+import csv
 import numpy as np
 import time
 from typing import Generator
@@ -15,7 +16,7 @@ from losses.cross_entropy import CrossEntropyLoss
 from optim.adam import Adam
 from optim.sgd import SGD
 from utils.io import save_model
-from utils.metrics import confusion_matrix
+from utils.metrics import confusion_matrix, classification_report
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train CNN on MNIST")
@@ -91,6 +92,7 @@ def main():
     #track training time
     training_start_time = time.time()
     epoch_times = []
+    training_log = []
 
     #train the model
     for epoch in range(epochs):
@@ -99,6 +101,7 @@ def main():
         model.train()
 
         epoch_loss = 0.0
+        epoch_grad_norm = 0.0
         num_batches = 0
 
         for Xb, yb in iterate_minibatches(X_train, y_train, batch_size, seed=epoch):
@@ -110,6 +113,10 @@ def main():
 
             dZ2 = loss_fn.backward(probs, yb)
             grads = model.backward(dZ2)
+
+            #track gradient norm before weight decay
+            grad_norm = np.sqrt(sum(np.sum(g**2) for g in grads.values()))
+            epoch_grad_norm += grad_norm
 
             #add l2 weight decay to gradients (only for weights, not biases)
             params = model.parameters()
@@ -138,12 +145,27 @@ def main():
         epoch_time = time.time() - epoch_start_time
         epoch_times.append(epoch_time)
 
+        avg_grad_norm = epoch_grad_norm / num_batches
+
+        #accumulate training log entry
+        training_log.append({
+            "epoch": epoch + 1,
+            "train_loss": round(epoch_loss / num_batches, 6),
+            "train_acc": round(train_acc, 6),
+            "val_loss": round(val_loss, 6),
+            "val_acc": round(val_acc, 6),
+            "lr": optimizer.lr,
+            "avg_grad_norm": round(avg_grad_norm, 6),
+            "epoch_time": round(epoch_time, 2),
+        })
+
         print(
             f"Epoch {epoch+1}/{epochs}, "
             f"Train Loss: {epoch_loss/num_batches:.4f}, "
             f"Train Acc: {train_acc:.4f}, "
             f"Val Loss: {val_loss:.4f}, "
             f"Val Acc: {val_acc:.4f}, "
+            f"Grad Norm: {avg_grad_norm:.4f}, "
             f"Time: {epoch_time:.2f}s"
         )
 
@@ -195,8 +217,21 @@ def main():
     print("\nConfusion Matrix:")
     print(cm)
 
+    #print classification report with per-class precision, recall, f1
+    print("\nClassification Report:")
+    print(classification_report(y_test, preds, 10))
+
     #save the model
     save_model(args.save_path, model.parameters())
+
+    #save training log to csv
+    if training_log:
+        csv_path = args.save_path.replace(".npz", "_training_log.csv")
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=training_log[0].keys())
+            writer.writeheader()
+            writer.writerows(training_log)
+        print(f"\nTraining log saved to {csv_path}")
 
 if __name__ == "__main__":
     main()
