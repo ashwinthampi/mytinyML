@@ -5,6 +5,7 @@
 import os
 import sys
 import numpy
+import cupy
 
 try:
     #fix CUDA paths for pip-installed nvidia packages on Windows
@@ -27,7 +28,6 @@ try:
             if os.path.isdir(nvcc_path) and "CUDA_PATH" not in os.environ:
                 os.environ["CUDA_PATH"] = nvcc_path
 
-    import cupy
     _gpu_available = True
 except ImportError:
     _gpu_available = False
