@@ -172,8 +172,10 @@ def main():
                 if "_W" in k or (k.startswith("W") and len(k) > 1 and k[1].isdigit()):
                     grads[k] += weight_decay * params[k]
 
+            #only pass learnable parameters to optimizer (excludes bn running stats)
+            learnable_params = {k: params[k] for k in grads}
             optimizer.step(
-                params=params,
+                params=learnable_params,
                 grads=grads
             )
 
